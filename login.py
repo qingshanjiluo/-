@@ -1,6 +1,7 @@
 import requests
 import time
 import os
+import re
 import ddddocr
 import cairosvg
 from io import BytesIO
