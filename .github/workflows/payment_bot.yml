@@ -2,9 +2,8 @@ name: 支付机器人
 
 on:
   schedule:
-    # 每 2 小时运行一次 (UTC 时间)
     - cron: '0 */2 * * *'
-  workflow_dispatch:  # 支持手动触发
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -21,10 +20,11 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 安装系统依赖
+      - name: 安装系统依赖（Playwright 所需）
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-0 libnss3 libxss1 libasound2 libgbm1  # Playwright 所需依赖
+          # 修正包名：libasound2 → libasound2t64（Ubuntu 24.04 兼容）
+          sudo apt-get install -y libgtk-3-0 libnss3 libxss1 libasound2t64 libgbm1
 
       - name: 安装 Python 依赖
         run: |
