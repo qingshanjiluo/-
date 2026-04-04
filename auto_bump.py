@@ -18,7 +18,10 @@ class AutoBumpBot:
         if not self.username or not self.password:
             raise ValueError("请设置 BOT_USERNAME 和 BOT_PASSWORD")
 
-        # 配置
+        # 登录重试次数（硬编码为50）
+        self.login_retries = 50
+
+        # 配置（从环境变量读取，保持原样）
         self.target_category = 5
         self.bump_interval = int(os.getenv("BUMP_INTERVAL", "120"))
         self.delete_delay = int(os.getenv("DELETE_DELAY", "3"))
@@ -63,7 +66,12 @@ class AutoBumpBot:
 
     def login(self):
         print("🔐 正在登录论坛...")
-        login_bot = BBSTurkeyBotLogin(self.base_url, self.username, self.password, max_retries=3)
+        login_bot = BBSTurkeyBotLogin(
+            base_url=self.base_url,
+            username=self.username,
+            password=self.password,
+            max_retries=self.login_retries   # 使用硬编码的50次重试
+        )
         success, result, session = login_bot.login_with_retry()
         if not success:
             print("❌ 登录失败")
@@ -73,7 +81,7 @@ class AutoBumpBot:
         self.session = session
         self.poster = BBSPoster(session, self.base_url)
 
-        # 刷新页面获取管理员权限（关键步骤）
+        # 刷新页面获取管理员权限
         print("⏳ 等待5秒并刷新页面以获取管理员权限...")
         time.sleep(5)
         try:
@@ -90,10 +98,8 @@ class AutoBumpBot:
         return ''.join(random.choice(chars) for _ in range(length))
 
     def create_or_get_guide_post(self):
-        """创建引导帖（仅当不存在时），返回帖子ID"""
         if self.guide_thread_id:
             print(f"📌 使用已有引导帖 ID: {self.guide_thread_id}")
-            # 验证帖子是否存在
             detail = self.poster.get_thread_detail(self.token, self.guide_thread_id)
             if detail:
                 return self.guide_thread_id
@@ -104,7 +110,6 @@ class AutoBumpBot:
                     self.state["guide_thread_id"] = None
                     self._save_state()
 
-        # 创建新引导帖（最多重试3次）
         for attempt in range(3):
             title = self.generate_random_text(15)
             content = self.generate_random_text(50)
@@ -173,12 +178,10 @@ class AutoBumpBot:
         print(f"⏰ 机器人将运行至 {end_time.strftime('%Y-%m-%d %H:%M:%S')} (共 {self.run_duration} 小时)")
         print(f"⏱️ 每 {self.check_interval} 秒检查一次引导帖\n")
 
-        # 加载已处理记录（如果状态文件存在）
         processed = []
         if hasattr(self, 'state'):
             processed = self.state.get("processed_threads", [])
         else:
-            # 如果没有状态文件，尝试加载
             if os.path.exists("bump_state.json"):
                 with open("bump_state.json", 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -196,7 +199,6 @@ class AutoBumpBot:
                 else:
                     self.bump_thread(target_id, self.bump_rounds)
                     processed.append(target_id)
-                    # 保存状态
                     if hasattr(self, 'state'):
                         self.state["processed_threads"] = processed
                         self._save_state()
