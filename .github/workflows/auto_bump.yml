@@ -2,7 +2,7 @@ name: 自动顶帖机器人
 
 on:
   schedule:
-    # 每天 6:00, 12:00, 21:00 (北京时间)
+    # 每天 6:00, 12:00, 21:00 (北京时间) 启动，每次运行5小时
     - cron: '0 22,4,13 * * *'
   workflow_dispatch:  # 手动触发
 
@@ -12,6 +12,7 @@ permissions:
 jobs:
   run-bump:
     runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6小时超时（略大于5小时）
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -30,7 +31,7 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: 运行顶帖机器人
+      - name: 运行顶帖机器人（持续5小时）
         env:
           BOT_USERNAME: ${{ secrets.BOT_USERNAME }}
           BOT_PASSWORD: ${{ secrets.BOT_PASSWORD }}
@@ -38,6 +39,8 @@ jobs:
           BUMP_INTERVAL: ${{ secrets.BUMP_INTERVAL }}
           DELETE_DELAY: ${{ secrets.DELETE_DELAY }}
           BUMP_ROUNDS: ${{ secrets.BUMP_ROUNDS }}
+          CHECK_INTERVAL: ${{ secrets.CHECK_INTERVAL }}
+          RUN_DURATION_HOURS: ${{ secrets.RUN_DURATION_HOURS }}
         run: |
           python auto_bump.py
 
