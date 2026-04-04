@@ -2,9 +2,8 @@ name: 自动顶帖机器人
 
 on:
   schedule:
-    # 每天 6:00, 12:00, 21:00 (北京时间) 启动，每次运行5小时
-    - cron: '0 22,4,13 * * *'
-  workflow_dispatch:  # 手动触发
+    - cron: '0 22,4,13 * * *'   # 每天 6:00, 12:00, 21:00 (北京时间)
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -12,26 +11,25 @@ permissions:
 jobs:
   run-bump:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6小时超时（略大于5小时）
+    timeout-minutes: 360
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 设置 Python 环境
+      - name: 设置 Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: 安装系统依赖（验证码识别所需）
+      - name: 安装系统依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-0
 
       - name: 安装 Python 依赖
-        run: |
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
-      - name: 运行顶帖机器人（持续5小时）
+      - name: 运行顶帖机器人
         env:
           BOT_USERNAME: ${{ secrets.BOT_USERNAME }}
           BOT_PASSWORD: ${{ secrets.BOT_PASSWORD }}
@@ -41,8 +39,8 @@ jobs:
           BUMP_ROUNDS: ${{ secrets.BUMP_ROUNDS }}
           CHECK_INTERVAL: ${{ secrets.CHECK_INTERVAL }}
           RUN_DURATION_HOURS: ${{ secrets.RUN_DURATION_HOURS }}
-        run: |
-          python auto_bump.py
+          GUIDE_THREAD_ID: ${{ secrets.GUIDE_THREAD_ID }}
+        run: python auto_bump.py
 
       - name: 提交状态文件
         run: |
