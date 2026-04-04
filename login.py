@@ -1,173 +1,164 @@
+# login.py
 import requests
-import re
+import json
 import time
-import os
-import base64
-import ddddocr
-import cairosvg
-from io import BytesIO
+import re
 
-class ForumLogin:
-    def __init__(self):
+class BBSTurkeyBotLogin:
+    def __init__(self, base_url, username, password, max_retries=50):
+        self.base_url = base_url.rstrip('/')
+        self.api_base = self.base_url
+        self.username = username
+        self.password = password
+        self.max_login_attempts = max_retries
+        self.max_captcha_retries = 3
         self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json, text/plain, */*',
-            'Content-Type': 'application/json',
-            'mbbs-domain': 'mk48by049.mbbs.cc',  # 关键头
-        })
-        # 从环境变量读取论坛地址，确保有默认值且不是空字符串
-        self.base_url = os.getenv("BASE_URL", "https://mk48by049.mbbs.cc").strip()
-        if not self.base_url:
-            self.base_url = "https://mk48by049.mbbs.cc"
-        # API 基础地址（根据 inspector 抓到的真实地址）
-        self.api_base = "https://mbbs.zdjl.site/mk48by049.mbbs.cc"
+        self._setup_headers()
+        self.ocr = self._init_ddddocr()
 
-    def _get_captcha(self):
-        """获取验证码 SVG，识别后返回验证码字符串"""
+    def _setup_headers(self):
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; Termux) AppleWebKit/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Origin': self.base_url,
+            'Referer': f'{self.base_url}/login',
+            'Content-Type': 'application/json',
+            'mbbs-domain': 'mk48by049.mbbs.cc'
+        })
+
+    def _init_ddddocr(self):
         try:
-            # 先访问首页获取必要的 cookie
-            self.session.get(self.base_url, timeout=10)
-            # 请求验证码
-            resp = self.session.get(f"{self.api_base}/bbs/login/captcha", timeout=10)
-            if resp.status_code != 200:
-                print(f"获取验证码失败，HTTP {resp.status_code}")
-                return None
-            data = resp.json()
-            svg_data = data.get("svg")
-            if not svg_data:
-                print("验证码数据为空，返回的 data: {data}")
-                return None
-            # SVG 转 PNG 并识别
-            png_data = cairosvg.svg2png(bytestring=svg_data.encode('utf-8'))
-            ocr = ddddocr.DdddOcr()
-            code = ocr.classification(png_data)
-            return code.strip()
+            import ddddocr
+            print("[OK] ddddocr 初始化成功")
+            return ddddocr.DdddOcr(show_ad=False)
+        except ImportError:
+            print("[错误] ddddocr 未安装，请执行: pip install ddddocr")
+            return None
         except Exception as e:
-            print(f"验证码识别异常: {e}")
+            print(f"[错误] ddddocr 初始化失败: {e}")
             return None
 
-    def _login_api(self, username, password):
-        """尝试 API 登录"""
-        captcha = self._get_captcha()
-        if not captcha:
-            print("无法获取验证码，API 登录失败")
-            return False, None, None, None
-
-        payload = {
-            "username": username,
-            "password": password,
-            "captcha": captcha
-        }
+    def svg_to_png_cairosvg(self, svg_content: str) -> bytes:
         try:
-            resp = self.session.post(f"{self.api_base}/bbs/login", json=payload, timeout=15)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("success"):
-                    token = data.get("token") or self.session.cookies.get("token")
-                    user_id = data.get("userId") or data.get("uid")
-                    print(f"✅ API 登录成功，用户ID: {user_id}")
-                    return True, self.session, token, user_id
-                else:
-                    print(f"API 登录失败: {data.get('message')}")
-                    return False, None, None, None
-            else:
-                print(f"API 请求失败: {resp.status_code}")
-                return False, None, None, None
-        except Exception as e:
-            print(f"API 登录异常: {e}")
-            return False, None, None, None
-
-    def _login_playwright(self, username, password):
-        """降级使用 Playwright 自动化登录"""
-        try:
-            from playwright.sync_api import sync_playwright
+            import cairosvg
+            png_data = cairosvg.svg2png(
+                bytestring=svg_content.encode('utf-8'),
+                output_width=300,
+                output_height=100,
+                dpi=200
+            )
+            return png_data
         except ImportError:
-            print("Playwright 未安装，无法降级登录")
-            return False, None, None, None
+            print("[错误] cairosvg 未安装，请执行: pip install cairosvg")
+            return None
+        except Exception as e:
+            print(f"[错误] cairosvg 转换失败: {e}")
+            return None
 
-        # 确保 base_url 有效
-        if not self.base_url or not self.base_url.startswith(('http://', 'https://')):
-            print(f"无效的 base_url: {self.base_url}")
-            return False, None, None, None
+    def get_login_captcha(self):
+        try:
+            print("[相机] 获取登录验证码...")
+            response = self.session.get(f"{self.api_base}/bbs/login/captcha", timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                captcha_data = data.get('data', {})
+                captcha_id = captcha_data.get('id')
+                svg_data = captcha_data.get('svg')
+                if captcha_id and svg_data:
+                    print(f"[OK] 验证码获取成功, ID: {captcha_id}")
+                    return captcha_id, svg_data
+            print(f"[错误] 验证码获取失败，状态码: {response.status_code}, 内容: {response.text[:200]}")
+            return None, None
+        except Exception as e:
+            print(f"[错误] 获取验证码错误: {e}")
+            return None, None
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context()
-            page = context.new_page()
+    def recognize_captcha_with_retry(self, svg_data: str) -> str:
+        if not self.ocr:
+            print("[错误] ddddocr 未初始化")
+            return None
+        for attempt in range(self.max_captcha_retries):
             try:
-                # 访问论坛首页
-                page.goto(self.base_url, timeout=15000)
-                # 点击登录按钮（可能需要等待元素）
-                page.click('button:has-text("登录")', timeout=10000)
-                # 等待输入框出现
-                page.wait_for_selector('input[name="username"]', timeout=5000)
-                page.fill('input[name="username"]', username)
-                page.fill('input[name="password"]', password)
-
-                # 获取验证码图片并识别
-                captcha_img = page.wait_for_selector('img[alt="captcha"]', timeout=5000)
-                img_src = captcha_img.get_attribute('src')
-                if img_src.startswith('data:image'):
-                    # 直接解码 base64 图片
-                    img_data = base64.b64decode(img_src.split(',')[1])
+                print(f"[识别] 第 {attempt + 1} 次尝试识别验证码...")
+                png_data = self.svg_to_png_cairosvg(svg_data)
+                if not png_data:
+                    continue
+                result = self.ocr.classification(png_data)
+                cleaned = re.sub(r'[^A-Za-z0-9]', '', result).upper()
+                if cleaned:
+                    print(f"[OK] 验证码识别成功: {cleaned}")
+                    return cleaned
                 else:
-                    # 如果是从 URL 加载，则请求图片
-                    img_resp = requests.get(img_src, timeout=10)
-                    img_data = img_resp.content
-                ocr = ddddocr.DdddOcr()
-                captcha = ocr.classification(img_data)
-
-                page.fill('input[name="captcha"]', captcha)
-                page.click('button:has-text("登录")')
-                page.wait_for_timeout(2000)
-
-                # 检查登录是否成功
-                if "sign_in" not in page.url and "login" not in page.url.lower():
-                    cookies = context.cookies()
-                    token = None
-                    for c in cookies:
-                        if c['name'] in ('token', 'auth', 'sid'):
-                            token = c['value']
-                            break
-                    # 获取用户ID
-                    user_id = None
-                    if token:
-                        page.goto(f"{self.base_url}/home.php?mod=space", timeout=10000)
-                        match = re.search(r'uid=(\d+)', page.content())
-                        if match:
-                            user_id = match.group(1)
-                    print(f"✅ Playwright 登录成功，用户ID: {user_id}")
-                    return True, None, token, user_id
-                else:
-                    print("Playwright 登录失败，可能验证码错误或账号问题")
-                    return False, None, None, None
+                    print(f"[警告] 验证码识别结果为空，重新识别...")
             except Exception as e:
-                print(f"Playwright 登录异常: {e}")
-                return False, None, None, None
-            finally:
-                browser.close()
+                print(f"[错误] 验证码识别失败: {e}")
+            if attempt < self.max_captcha_retries - 1:
+                time.sleep(1)
+        print("[错误] 验证码识别重试次数用尽")
+        return None
 
-    def login(self, username, password, retries=3, base_url=None):
-        """
-        登录论坛，返回 (success, session, token, user_id)
-        如果提供了 base_url，则更新 self.base_url
-        """
-        if base_url:
-            self.base_url = base_url.strip()
-        for attempt in range(retries):
-            print(f"登录尝试 {attempt+1}/{retries}")
-            # 尝试 API 登录
-            success, session, token, user_id = self._login_api(username, password)
+    def login_with_captcha(self, captcha_id: str, captcha_text: str) -> tuple:
+        try:
+            login_data = {
+                "username": self.username,
+                "password": self.password,
+                "captcha_id": captcha_id,
+                "captcha_text": captcha_text
+            }
+            print("[登录] 提交登录请求...")
+            response = self.session.post(f"{self.api_base}/bbs/login", json=login_data, timeout=15)
+            print(f"[响应] 状态码: {response.status_code}")
+            if response.status_code == 200:
+                result = response.json()
+                print(f"[登录] 响应: {json.dumps(result, ensure_ascii=False)}")
+                if result.get('success') is True:
+                    user_data = result.get('data', {})
+                    if user_data and ('id' in user_data or 'token' in user_data):
+                        print("[成功] 登录成功!")
+                        return True, result, None
+                    else:
+                        error_msg = "响应数据不完整"
+                        print(f"[错误] 登录失败: {error_msg}")
+                        return False, None, error_msg
+                else:
+                    error_msg = result.get('message', '未知错误')
+                    print(f"[错误] 登录失败: {error_msg}")
+                    return False, None, error_msg
+            else:
+                print(f"[错误] HTTP 错误: {response.status_code}")
+                return False, None, f"HTTP {response.status_code}"
+        except Exception as e:
+            print(f"[错误] 登录请求异常: {e}")
+            return False, None, str(e)
+
+    def login_with_retry(self):
+        print("[启动] 开始登录流程...")
+        print(f"[账号] 用户名: {self.username}")
+        print(f"[设置] 最大重试次数: {self.max_login_attempts}")
+        print("=" * 50)
+        login_attempts = 0
+        while login_attempts < self.max_login_attempts:
+            login_attempts += 1
+            print(f"\n[尝试] 第 {login_attempts}/{self.max_login_attempts} 次登录尝试...")
+            captcha_id, svg_data = self.get_login_captcha()
+            if not captcha_id:
+                print("[错误] 获取验证码失败，继续重试...")
+                time.sleep(2)
+                continue
+            captcha_text = self.recognize_captcha_with_retry(svg_data)
+            if not captcha_text:
+                print("[错误] 验证码识别失败，继续重试...")
+                time.sleep(2)
+                continue
+            success, result, error_msg = self.login_with_captcha(captcha_id, captcha_text)
             if success:
-                return success, session, token, user_id
-            # 如果 API 失败，降级 Playwright
-            print("API 登录失败，尝试降级 Playwright")
-            success, session, token, user_id = self._login_playwright(username, password)
-            if success:
-                # 如果 playwright 成功，但 session 为空，可以返回一个新的 session（基于 cookies）
-                # 这里简单返回 None，调用方可能需要重新创建 session
-                return success, session, token, user_id
-            print("所有登录方式均失败，等待重试...")
-            time.sleep(2)
-        return False, None, None, None
+                print(f"[成功] 登录成功！总共尝试 {login_attempts} 次")
+                return True, result, self.session
+            if error_msg and ("验证码" in error_msg or "captcha" in error_msg.lower()):
+                print("[重试] 验证码错误，立即重试...")
+                continue
+            else:
+                print("[等待] 其他错误，等待 2 秒后重试...")
+                time.sleep(2)
+        print(f"[失败] 登录失败！已达到最大重试次数 {self.max_login_attempts}")
+        return False, None, None
