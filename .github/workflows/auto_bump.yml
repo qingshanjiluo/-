@@ -2,7 +2,7 @@ name: 自动顶帖机器人
 
 on:
   schedule:
-    - cron: '0 22,4,13 * * *'   # 每天 6:00, 12:00, 21:00 (北京时间)
+    - cron: ''   # 每天 6:00, 12:00, 21:00 (北京时间)
   workflow_dispatch:
 
 permissions:
